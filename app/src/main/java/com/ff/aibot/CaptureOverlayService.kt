@@ -48,8 +48,12 @@ class CaptureOverlayService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
     private var panel: LinearLayout? = null
+    private var panelParams: WindowManager.LayoutParams? = null
+    private var restoreButton: Button? = null
     private var status: TextView? = null
     private var markerView: MarkerView? = null
+    private var lastBoxes: List<Box> = emptyList()
+    private var lastBoxesAt = 0L
     private lateinit var windowManager: WindowManager
     private var detector: ObjectDetector? = null
     private var worker: HandlerThread? = null
@@ -143,7 +147,25 @@ class CaptureOverlayService : Service() {
             } else null
         }
         bitmap.recycle()
-        markerView?.post { markerView?.boxes = boxes; markerView?.invalidate() }
+        val now = System.currentTimeMillis()
+        val stableBoxes = if (boxes.isNotEmpty()) {
+            // Blend nearby detections with the previous frame to reduce box jitter.
+            boxes.map { current ->
+                val previous = lastBoxes.minByOrNull { old ->
+                    kotlin.math.abs((old.left + old.right) / 2f - (current.left + current.right) / 2f) +
+                        kotlin.math.abs((old.top + old.bottom) / 2f - (current.top + current.bottom) / 2f)
+                }
+                if (previous != null && now - lastBoxesAt < 900) Box(
+                    previous.left * 0.35f + current.left * 0.65f,
+                    previous.top * 0.35f + current.top * 0.65f,
+                    previous.right * 0.35f + current.right * 0.65f,
+                    previous.bottom * 0.35f + current.bottom * 0.65f,
+                    current.score
+                ) else current
+            }.also { lastBoxes = it; lastBoxesAt = now }
+        } else if (now - lastBoxesAt < 900) lastBoxes else emptyList()
+        if (stableBoxes.isEmpty() && now - lastBoxesAt >= 900) lastBoxes = emptyList()
+        markerView?.post { markerView?.boxes = stableBoxes; markerView?.invalidate() }
         status?.post {
             status?.text = if (boxes.isEmpty()) "Đang quét màn hình… chưa thấy người rõ ràng"
             else "Phát hiện ${boxes.size} hình người khả nghi (không xác định phe)"
@@ -170,14 +192,47 @@ class CaptureOverlayService : Service() {
             setTextColor(Color.WHITE); textSize = 13f
         }
         card.addView(status)
-        card.addView(Button(this).apply { text = "Đóng"; setOnClickListener { stopSelf() } })
+        val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        controls.addView(Button(this).apply {
+            text = "Ẩn bảng"
+            setOnClickListener { hidePanel() }
+        })
+        controls.addView(Button(this).apply { text = "Dừng"; setOnClickListener { stopSelf() } })
+        card.addView(controls)
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
             overlayType(), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.END; x = 16; y = 120 }
+        panelParams = params
         windowManager.addView(card, params)
         panel = card
+    }
+
+    private fun hidePanel() {
+        val current = panel ?: return
+        runCatching { windowManager.removeView(current) }
+        panel = null
+        val mini = Button(this).apply {
+            text = "AI"
+            textSize = 12f
+            setOnClickListener { showPanelAgain() }
+        }
+        val miniParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            overlayType(), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.TOP or Gravity.END; x = 16; y = 120 }
+        windowManager.addView(mini, miniParams)
+        restoreButton = mini
+    }
+
+    private fun showPanelAgain() {
+        val mini = restoreButton ?: return
+        runCatching { windowManager.removeView(mini) }
+        restoreButton = null
+        val current = panel ?: return
+        panelParams?.let { runCatching { windowManager.addView(current, it) } }
     }
 
     private fun overlayType() = if (Build.VERSION.SDK_INT >= 26)
@@ -220,6 +275,7 @@ class CaptureOverlayService : Service() {
 
     override fun onDestroy() {
         panel?.let { runCatching { windowManager.removeView(it) } }
+        restoreButton?.let { runCatching { windowManager.removeView(it) } }
         markerView?.let { runCatching { windowManager.removeView(it) } }
         virtualDisplay?.release()
         imageReader?.close()
