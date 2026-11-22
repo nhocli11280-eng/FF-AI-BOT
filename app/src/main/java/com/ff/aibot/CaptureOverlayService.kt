@@ -29,6 +29,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetectorResult
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector.ObjectDetectorOptions
@@ -67,10 +68,15 @@ class CaptureOverlayService : Service() {
         try {
             val model = File(filesDir, "efficientdet_lite0.tflite")
             assets.open("efficientdet_lite0.tflite").use { input -> model.outputStream().use(input::copyTo) }
-            detector = ObjectDetector.createFromFileAndOptions(
-                this, model.absolutePath,
-                ObjectDetectorOptions.builder().setScoreThreshold(0.35f).setMaxResults(12).build()
-            )
+            val baseOptions = BaseOptions.builder()
+                .setModelAssetPath(model.absolutePath)
+                .build()
+            val detectorOptions = ObjectDetectorOptions.builder()
+                .setBaseOptions(baseOptions)
+                .setScoreThreshold(0.35f)
+                .setMaxResults(12)
+                .build()
+            detector = ObjectDetector.createFromOptions(this, detectorOptions)
         } catch (_: Exception) {
             detector = null
         }
