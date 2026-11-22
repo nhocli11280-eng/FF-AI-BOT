@@ -28,6 +28,9 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector
@@ -40,6 +43,8 @@ class CaptureOverlayService : Service() {
     companion object {
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
+        const val ACTION_OCR_COMMENT = "com.ff.aibot.LIVE_OCR_COMMENT"
+        const val EXTRA_OCR_TEXT = "ocr_text"
         private const val CHANNEL_ID = "ff_ai_capture"
         private const val NOTIFICATION_ID = 41
     }
@@ -60,6 +65,8 @@ class CaptureOverlayService : Service() {
     private var workerHandler: Handler? = null
     private val busy = AtomicBoolean(false)
     private var lastFrameAt = 0L
+    private var lastOcrAt = 0L
+    private val textRecognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
     private var screenWidth = 1
     private var screenHeight = 1
 
@@ -146,8 +153,23 @@ class CaptureOverlayService : Service() {
                 Box(r.left, r.top, r.right, r.bottom, category.score())
             } else null
         }
-        bitmap.recycle()
         val now = System.currentTimeMillis()
+        if (now - lastOcrAt >= 1400) {
+            lastOcrAt = now
+            val cropTop = (bitmap.height * 0.48f).toInt().coerceIn(0, bitmap.height - 1)
+            val chatCrop = Bitmap.createBitmap(bitmap, 0, cropTop, bitmap.width, bitmap.height - cropTop)
+            textRecognizer.process(InputImage.fromBitmap(chatCrop, 0))
+                .addOnSuccessListener { result ->
+                    val lines = result.textBlocks.flatMap { it.lines }.map { it.text.trim() }
+                        .filter { it.length in 3..180 && !it.matches(Regex("^[0-9:., ]+$")) }
+                    val candidate = lines.takeLast(3).joinToString(". ").take(350)
+                    if (candidate.isNotBlank()) {
+                        sendBroadcast(Intent(ACTION_OCR_COMMENT).setPackage(packageName).putExtra(EXTRA_OCR_TEXT, candidate))
+                    }
+                }
+                .addOnCompleteListener { chatCrop.recycle() }
+        }
+        bitmap.recycle()
         val stableBoxes = if (boxes.isNotEmpty()) {
             // Blend nearby detections with the previous frame to reduce box jitter.
             boxes.map { current ->

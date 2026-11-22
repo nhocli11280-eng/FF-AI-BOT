@@ -21,6 +21,7 @@ kotlin { jvmToolchain(17) }
 
 dependencies {
     implementation("com.google.mediapipe:tasks-vision:0.10.14")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 }
 
 val downloadObjectModel by tasks.registering {
