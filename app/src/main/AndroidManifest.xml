@@ -7,7 +7,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
-        android:label="AI Game Worker"
+        android:label="AI TikTok LIVE Avatar"
         android:allowBackup="false"
         android:usesCleartextTraffic="false">
         <activity android:name=".MainActivity" android:exported="true">
