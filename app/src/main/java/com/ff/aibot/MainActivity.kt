@@ -31,12 +31,12 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
         val info = TextView(this).apply {
-            text = "Trợ lý nổi hỗ trợ xem màn hình. Bản thử nghiệm hiện mới thiết lập chia sẻ màn hình và cửa sổ nổi; chưa có AI nhận diện địch."
+            text = "Trợ lý thử nghiệm: phân tích màn hình và khoanh vùng người có thể xuất hiện. Nhận diện người không đồng nghĩa xác định chắc chắn đó là địch."
             textSize = 16f
             setPadding(0, 24, 0, 24)
         }
         val start = Button(this).apply {
-            text = "BẮT ĐẦU CHIA SẺ MÀN HÌNH"
+            text = "BẮT ĐẦU PHÂN TÍCH MÀN HÌNH"
             setOnClickListener { beginCapture() }
         }
         val stop = Button(this).apply {
@@ -52,8 +52,7 @@ class MainActivity : Activity() {
 
     private fun beginCapture() {
         if (!Settings.canDrawOverlays(this)) {
-            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-            startActivity(intent)
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
             return
         }
         startActivityForResult(projectionManager.createScreenCaptureIntent(), requestCapture)
