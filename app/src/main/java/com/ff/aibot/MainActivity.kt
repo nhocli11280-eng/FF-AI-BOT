@@ -3,6 +3,10 @@ package com.ff.aibot
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.Context
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -32,6 +36,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var startButton: Button
     private lateinit var voiceButton: Button
     private lateinit var chatInput: EditText
+    private var lastAutoReplyAt = 0L
+    private var lastSeenComment = ""
+    private val chatReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val comment = intent?.getStringExtra(CaptureOverlayService.EXTRA_OCR_TEXT)?.trim().orEmpty()
+            if (comment.length < 3 || comment == lastSeenComment) return
+            val now = System.currentTimeMillis()
+            if (now - lastAutoReplyAt < 9000) return
+            lastSeenComment = comment
+            lastAutoReplyAt = now
+            addMessage("LIVE • $comment", "")
+            say(makeReply(comment))
+        }
+    }
 
     private val tick = object : Runnable {
         override fun run() {
@@ -52,6 +70,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onCreate(savedInstanceState)
         tts = TextToSpeech(this, this)
         render()
+        val filter = IntentFilter(CaptureOverlayService.ACTION_OCR_COMMENT)
+        if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(chatReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        else registerReceiver(chatReceiver, filter)
     }
 
     override fun onInit(status: Int) {
@@ -150,6 +171,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener { say("Xin chào cả nhà! Cảm ơn mọi người đã ghé vào phòng LIVE. Mọi người hôm nay thế nào?") }
         }, LinearLayout.LayoutParams(0, dp(48), 1f))
         body.addView(actions, params(-1, dp(52)))
+        body.addView(Button(this).apply {
+            text = "👁 Bật AI đọc chat trên màn hình"; isAllCaps = false
+            setOnClickListener {
+                val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                startActivityForResult(manager.createScreenCaptureIntent(), 731)
+            }
+        }, params(-1, dp(50)))
 
         body.addView(TextView(this).apply {
             text = "KỊCH BẢN TRÒ CHUYỆN NHANH"
@@ -204,9 +232,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setBackgroundColor(0xFFFFFFFF.toInt())
         }
         body.addView(logBox, params(-1, -2))
-        addMessage("Hệ thống", "MC hoạt động offline bằng kịch bản và giọng đọc Android. Bình luận TikTok cần bạn nhập tay.")
+        addMessage("Hệ thống", "Cấp quyền chia sẻ màn hình để AI nhận diện chữ chat đang hiển thị. AI phản hồi bằng giọng nói, không gửi tin nhắn vào TikTok.")
         body.addView(TextView(this).apply {
-            text = "GIỚI HẠN: Đây là avatar minh họa và trợ lý MC trên điện thoại, chưa phải nhân vật 3D/AI tạo sinh. Ứng dụng không tự đọc bình luận TikTok, không tự phát LIVE và không giữ máy chạy nền 8 giờ nếu Android đóng ứng dụng. Hãy dùng tính năng LIVE chính thức và tuân thủ điều kiện của TikTok."
+            text = "GIỚI HẠN: OCR chỉ nhận diện chữ đang hiển thị trên màn hình được bạn cấp quyền; có thể đọc nhầm hoặc bỏ sót. AI chỉ trả lời bằng giọng nói, không tự đăng chat và không tự phát LIVE. Giữ ứng dụng chạy khi sử dụng."
             textSize = 11f; setTextColor(0xFF8A4B16.toInt())
             setPadding(dp(10), dp(12), dp(10), dp(12))
             setBackgroundColor(0xFFFFF1D6.toInt())
@@ -277,7 +305,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun params(width: Int, height: Int) = LinearLayout.LayoutParams(width, height).apply { bottomMargin = dp(5) }
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 731 && resultCode == RESULT_OK && data != null) {
+            val service = Intent(this, CaptureOverlayService::class.java).apply {
+                putExtra(CaptureOverlayService.EXTRA_RESULT_CODE, resultCode)
+                putExtra(CaptureOverlayService.EXTRA_RESULT_DATA, data)
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(service) else startService(service)
+            addMessage("Hệ thống", "Đã bật OCR. Mở TikTok LIVE và để bình luận xuất hiện rõ ở nửa dưới màn hình.")
+        }
+    }
+
     override fun onDestroy() {
+        runCatching { unregisterReceiver(chatReceiver) }
         stopSession()
         if (::tts.isInitialized) tts.shutdown()
         super.onDestroy()
