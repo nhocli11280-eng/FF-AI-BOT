@@ -212,7 +212,6 @@ class CaptureOverlayService : Service() {
     private fun hidePanel() {
         val current = panel ?: return
         runCatching { windowManager.removeView(current) }
-        panel = null
         val mini = Button(this).apply {
             text = "AI"
             textSize = 12f
